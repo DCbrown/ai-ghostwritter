@@ -1,10 +1,5 @@
-import OpenAI from "openai";
-
-// Initialize OpenAI client with the dangerous flag
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true, // Be careful with this in production!
-});
+// Client-side API functions
+// These functions communicate with the server-side API routes
 
 export async function transcribeSpeech(audioBlob: Blob): Promise<string> {
   const formData = new FormData();
@@ -75,36 +70,4 @@ export async function textToSpeech(text: string): Promise<ArrayBuffer> {
   } else {
     throw new Error(data.error || "Failed to generate speech");
   }
-}
-
-function getSystemPrompt(style: string, persona: string | null): string {
-  let prompt = `You are an expert writer specializing in ${style} writing. `;
-
-  switch (style) {
-    case "formal":
-      prompt +=
-        "Write in a professional, structured manner suitable for essays or reports.";
-      break;
-    case "casual":
-      prompt +=
-        "Write in a relaxed, conversational tone appropriate for blogs or social media.";
-      break;
-    case "persuasive":
-      prompt +=
-        "Write compelling copy designed to convince and motivate action.";
-      break;
-    case "creative":
-      prompt +=
-        "Write with imaginative flair, using descriptive language and narrative techniques.";
-      break;
-  }
-
-  if (persona) {
-    prompt += ` Adopt the writing style and voice of ${persona}.`;
-  }
-
-  prompt += ` Structure the text appropriately with headings, paragraphs, and bullet points as needed.
-  Improve grammar and clarity. Remove redundancies and unclear phrases.`;
-
-  return prompt;
 }
