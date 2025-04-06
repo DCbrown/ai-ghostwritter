@@ -1,7 +1,7 @@
 # ai-ghostwritter
 ## Getting Started
 
-First, create a new file named `.env.local` key, [OpenAI API](https://platform.openai.com/docs/overview) there.
+First, create a new file named `.env` key, [OpenAI API](https://platform.openai.com/docs/overview) there.
 
 `
 OPENAI_API_KEY=""
