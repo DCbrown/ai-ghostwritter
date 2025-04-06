@@ -31,25 +31,66 @@ export default function RecordPage() {
   // States for read aloud functionality
   const [isProcessingSpeech, setIsProcessingSpeech] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isIntentionalStop, setIsIntentionalStop] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
+  // Function to entirely stop audio playback
+  const stopAudioPlayback = () => {
+    if (audioPlayerRef.current) {
+      // Mark this as an intentional stop to prevent error messages
+      setIsIntentionalStop(true);
+      const audio = audioPlayerRef.current;
+
+      // Hard pause
+      audio.pause();
+
+      // Reset all properties
+      audio.currentTime = 0;
+      audio.volume = 0;
+
+      // Empty source
+      audio.src = "";
+
+      // Force browser to update
+      audio.load();
+
+      // Update state
+      setIsPlaying(false);
+      setIsProcessingSpeech(false);
+
+      // Clear URL if exists
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
+
+      // Clear reference
+      audioPlayerRef.current = null;
+
+      // Reset error if it was caused by audio playback
+      if (error?.includes("Error playing audio")) {
+        setError(null);
+      }
+    }
+  };
+
   // Function to navigate back to the previous screen
   const handleGoBack = () => {
-    // Clean up any ongoing recording or audio
+    // First stop recording if active
     if (recording) {
       stopRecording();
     }
 
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
+    // Then forcefully stop audio playback
+    stopAudioPlayback();
 
-    // Navigate back to the home page
-    router.push("/");
+    // Only navigate after cleanup
+    setTimeout(() => {
+      router.push("/");
+    }, 50);
   };
 
   // Start recording function
@@ -119,78 +160,57 @@ export default function RecordPage() {
   // Read the transformed text aloud with enhanced states
   const readAloud = async () => {
     try {
-      // Set processing state
       setIsProcessingSpeech(true);
+      setIsIntentionalStop(false);
 
-      // Properly clean up any existing audio
-      if (audioPlayerRef.current) {
-        // Remove event listeners to prevent memory leaks
-        const oldAudio = audioPlayerRef.current;
-        oldAudio.removeEventListener("play", () => setIsPlaying(true));
-        oldAudio.removeEventListener("ended", handleAudioEnded);
-        oldAudio.removeEventListener("pause", () => setIsPlaying(false));
-        oldAudio.removeEventListener("error", () => {
-          setIsPlaying(false);
-          setIsProcessingSpeech(false);
-        });
-
-        // Stop the audio
-        oldAudio.pause();
-        audioPlayerRef.current = null;
-
-        // Add a small delay to ensure the pause is processed
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      // Stop any existing audio first
+      stopAudioPlayback();
 
       // Generate new speech
       const audioBuffer = await textToSpeech(transformedText);
       const blob = new Blob([audioBuffer], { type: "audio/mp3" });
 
-      // Clean up old URL if it exists
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
-
-      // Create new URL and set states
+      // Create new URL
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
 
-      // Create and configure audio player
-      const audio = new Audio();
+      // Create new audio element
+      const audio = new Audio(url);
 
-      // Set up event listeners before setting source
-      audio.addEventListener("play", () => setIsPlaying(true));
-      audio.addEventListener("ended", handleAudioEnded);
-      audio.addEventListener("pause", () => setIsPlaying(false));
-      audio.addEventListener("error", (e) => {
-        console.error("Audio playback error:", e);
+      // Set up simple event handlers
+      audio.onplay = () => setIsPlaying(true);
+      audio.onpause = () => setIsPlaying(false);
+      audio.onended = () => {
+        setIsPlaying(false);
+        // Don't clear audio reference here to allow replay
+      };
+      audio.onerror = () => {
         setIsPlaying(false);
         setIsProcessingSpeech(false);
-        setError("Error playing audio. Please try again.");
-      });
+        if (!isIntentionalStop) {
+          setError("Error playing audio. Please try again.");
+        }
+      };
 
-      // Set the source
-      audio.src = url;
+      // Store reference
       audioPlayerRef.current = audio;
 
-      // Wait for audio to be loaded before playing
-      audio.addEventListener(
-        "canplaythrough",
-        () => {
+      // Play when ready
+      audio.oncanplaythrough = () => {
+        setIsProcessingSpeech(false);
+        audio.play().catch((err) => {
+          console.error("Error playing audio:", err);
+          setIsPlaying(false);
           setIsProcessingSpeech(false);
-          audio.play().catch((err) => {
-            console.error("Error playing audio:", err);
-            setIsPlaying(false);
-            setIsProcessingSpeech(false);
+          if (!isIntentionalStop) {
             setError("Error playing audio. Please try again.");
-          });
-        },
-        { once: true }
-      );
+          }
+        });
+      };
 
-      // Set a timeout in case loading takes too long
+      // Set timeout for loading
       setTimeout(() => {
-        if (isProcessingSpeech) {
+        if (isProcessingSpeech && !isIntentionalStop) {
           setIsProcessingSpeech(false);
           setError("Audio loading timed out. Please try again.");
         }
@@ -198,46 +218,19 @@ export default function RecordPage() {
     } catch (err) {
       setIsProcessingSpeech(false);
       setIsPlaying(false);
-      setError("Error generating speech. Please try again.");
+      if (!isIntentionalStop) {
+        setError("Error generating speech. Please try again.");
+      }
       console.error("Text-to-speech error:", err);
     }
   };
 
-  // Update the handleAudioEnded function
-  const handleAudioEnded = () => {
-    setIsPlaying(false);
-
-    // Clean up properly after playback
-    if (audioPlayerRef.current) {
-      const audio = audioPlayerRef.current;
-
-      // Remove event listeners
-      audio.removeEventListener("play", () => setIsPlaying(true));
-      audio.removeEventListener("ended", handleAudioEnded);
-      audio.removeEventListener("pause", () => setIsPlaying(false));
-
-      // Wait before nullifying to prevent race conditions
-      setTimeout(() => {
-        if (audioPlayerRef.current === audio) {
-          audioPlayerRef.current = null;
-        }
-      }, 500);
-    }
-  };
-
-  // Clean up audio URL and player on component unmount
+  // Clean up resources on unmount
   useEffect(() => {
     return () => {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
-
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current = null;
-      }
+      stopAudioPlayback();
     };
-  }, [audioUrl]);
+  }, []);
 
   return (
     <div className="min-h-screen p-8 flex flex-col items-center">
@@ -257,10 +250,12 @@ export default function RecordPage() {
       </p>
 
       <div className="w-full max-w-3xl mb-8 flex flex-col items-center">
-        <RecordButton
-          isRecording={recording}
-          onClick={recording ? stopRecording : startRecording}
-        />
+        {!transcribing && !transforming && (
+          <RecordButton
+            isRecording={recording}
+            onClick={recording ? stopRecording : startRecording}
+          />
+        )}
 
         {(transcribing || transforming) && (
           <LoadingSpinner
@@ -281,11 +276,34 @@ export default function RecordPage() {
 
       {transformedText && (
         <TextSection title="Transformed Text" content={transformedText}>
-          <ReadAloudButton
-            isProcessing={isProcessingSpeech}
-            isPlaying={isPlaying}
-            onClick={readAloud}
-          />
+          <div className="flex items-center gap-2">
+            <ReadAloudButton
+              isProcessing={isProcessingSpeech}
+              isPlaying={isPlaying}
+              onClick={readAloud}
+            />
+            {isPlaying && (
+              <button
+                onClick={stopAudioPlayback}
+                className="flex items-center gap-1 text-sm border rounded-full px-3 py-1 text-red-500 border-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 dark:border-red-700"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="6" y="4" width="12" height="16" rx="2"></rect>
+                </svg>
+                <span>Stop</span>
+              </button>
+            )}
+          </div>
         </TextSection>
       )}
 
