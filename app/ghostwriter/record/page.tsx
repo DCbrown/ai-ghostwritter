@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   transcribeSpeech,
@@ -15,7 +15,8 @@ import TextSection from "@/app/components/TextSection";
 import TextActions from "@/app/components/TextActions";
 import ReadAloudButton from "@/app/components/ReadAloudButton";
 
-export default function RecordPage() {
+// Main content component that uses useSearchParams - must be wrapped in Suspense
+function RecordPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const style = searchParams.get("style") || "casual";
@@ -311,5 +312,20 @@ export default function RecordPage() {
 
       <Footer />
     </div>
+  );
+}
+
+// Wrapper component that provides Suspense boundary
+export default function RecordPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <LoadingSpinner />
+        </div>
+      }
+    >
+      <RecordPageContent />
+    </Suspense>
   );
 }
