@@ -136,6 +136,8 @@ function RecordPageContent() {
   const handleTranscription = async () => {
     try {
       setTranscribing(true);
+      setError(null); // Clear any previous errors
+
       const audioBlob = new Blob(audioChunksRef.current, {
         type: "audio/webm",
       });
@@ -151,10 +153,24 @@ function RecordPageContent() {
       setTransformedText(transformed);
       setTransforming(false);
     } catch (err) {
-      setError("Error processing your speech. Please try again.");
+      let errorMessage = "Error processing your speech. Please try again.";
+
+      // Handle specific error messages from the API
+      if (err instanceof Error) {
+        console.error("Transcription error details:", err.message);
+
+        if (err.message.includes("timed out")) {
+          errorMessage =
+            "Your recording is too long. Please try a shorter recording.";
+        } else if (err.message.includes("OpenAI service")) {
+          errorMessage =
+            "OpenAI service is currently unavailable. Please try again later.";
+        }
+      }
+
+      setError(errorMessage);
       setTranscribing(false);
       setTransforming(false);
-      console.error("Transcription error:", err);
     }
   };
 
@@ -226,6 +242,19 @@ function RecordPageContent() {
     }
   };
 
+  // Add a retry button component below the error message
+  const RetryButton = () => (
+    <button
+      onClick={() => {
+        setError(null);
+        startRecording();
+      }}
+      className="mt-2 bg-foreground text-background rounded-full py-2 px-4 hover:bg-[#383838] dark:hover:bg-[#ccc] transition-colors text-sm"
+    >
+      Try Again
+    </button>
+  );
+
   // Clean up resources on unmount
   useEffect(() => {
     return () => {
@@ -268,7 +297,12 @@ function RecordPageContent() {
           />
         )}
 
-        {error && <div className="mt-4 text-red-500 text-center">{error}</div>}
+        {error && (
+          <div className="mt-4 text-center">
+            <div className="text-red-500">{error}</div>
+            <RetryButton />
+          </div>
+        )}
       </div>
 
       {rawText && (
