@@ -4,51 +4,78 @@ import OpenAI from "openai";
 // Initialize OpenAI client safely on the server side
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000, // Set 30s timeout for OpenAI requests
 });
 
 export async function POST(request: NextRequest) {
-  const { action, data } = await request.json();
-
   try {
-    switch (action) {
-      case "transform":
-        const { text, style, persona } = data;
-        const systemPrompt = getSystemPrompt(style, persona);
+    const { action, data } = await request.json();
 
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4-turbo",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: text },
-          ],
-        });
+    try {
+      switch (action) {
+        case "transform":
+          const { text, style, persona } = data;
+          const systemPrompt = getSystemPrompt(style, persona);
 
-        return NextResponse.json({
-          result: completion.choices[0].message.content || "",
-        });
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4-turbo",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: text },
+            ],
+          });
 
-      case "textToSpeech":
-        const { input } = data;
-        const speechResponse = await openai.audio.speech.create({
-          model: "tts-1",
-          voice: "alloy",
-          input,
-        });
+          return NextResponse.json({
+            result: completion.choices[0].message.content || "",
+          });
 
-        // Convert to ArrayBuffer and then to Base64
-        const buffer = await speechResponse.arrayBuffer();
-        const base64 = Buffer.from(buffer).toString("base64");
+        case "textToSpeech":
+          const { input } = data;
+          const speechResponse = await openai.audio.speech.create({
+            model: "tts-1",
+            voice: "alloy",
+            input,
+          });
 
-        return NextResponse.json({ result: base64 });
+          // Convert to ArrayBuffer and then to Base64
+          const buffer = await speechResponse.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString("base64");
 
-      default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+          return NextResponse.json({ result: base64 });
+
+        default:
+          return NextResponse.json(
+            { error: "Invalid action" },
+            { status: 400 }
+          );
+      }
+    } catch (openaiError) {
+      console.error("OpenAI API error:", openaiError);
+
+      // Handle OpenAI specific errors
+      let errorMessage = "Failed to process request";
+      let statusCode = 500;
+
+      if (openaiError instanceof Error) {
+        if (openaiError.message.includes("timeout")) {
+          errorMessage =
+            "Request timed out. Please try again with shorter content.";
+        } else if (openaiError.message.includes("rate limit")) {
+          errorMessage = "API rate limit exceeded. Please try again later.";
+          statusCode = 429;
+        } else if (openaiError.message.includes("API key")) {
+          errorMessage = "API configuration error. Please contact support.";
+        }
+      }
+
+      return NextResponse.json({ error: errorMessage }, { status: statusCode });
     }
-  } catch (error) {
-    console.error("OpenAI API error:", error);
+  } catch (parseError) {
+    // Handle request parsing errors
+    console.error("Request parsing error:", parseError);
     return NextResponse.json(
-      { error: "Failed to process request" },
-      { status: 500 }
+      { error: "Invalid request format" },
+      { status: 400 }
     );
   }
 }

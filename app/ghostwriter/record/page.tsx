@@ -142,29 +142,83 @@ function RecordPageContent() {
         type: "audio/webm",
       });
 
-      // Transcribe audio using Whisper API
-      const text = await transcribeSpeech(audioBlob);
+      // Check if audio is empty
+      if (audioBlob.size < 1000) {
+        // Less than 1KB is likely too short
+        throw new Error(
+          "Audio recording is too short. Please record a longer message."
+        );
+      }
+
+      // Transcribe audio using Whisper API with timeout handling
+      let text;
+      try {
+        text = await transcribeSpeech(audioBlob);
+      } catch (transcriptionError) {
+        console.error("Transcription failed:", transcriptionError);
+        // If we get a gateway timeout, provide a specific message
+        if (
+          transcriptionError instanceof Error &&
+          (transcriptionError.message.includes("504") ||
+            transcriptionError.message.includes("gateway") ||
+            transcriptionError.message.includes("timeout"))
+        ) {
+          throw new Error(
+            "Server timeout. Your recording may be too long for processing. Try a shorter recording."
+          );
+        } else {
+          // Otherwise, rethrow the original error
+          throw transcriptionError;
+        }
+      }
+
+      // Set the transcribed text if we got it successfully
       setRawText(text);
 
       // Transform the text based on style and persona
       setTransforming(true);
       setTranscribing(false);
-      const transformed = await transformText(text, style, persona);
-      setTransformedText(transformed);
-      setTransforming(false);
+
+      try {
+        const transformed = await transformText(text, style, persona);
+        setTransformedText(transformed);
+        setTransforming(false);
+      } catch (transformError) {
+        console.error("Text transformation failed:", transformError);
+        throw new Error("Failed to transform your text. Please try again.");
+      }
     } catch (err) {
       let errorMessage = "Error processing your speech. Please try again.";
 
       // Handle specific error messages from the API
       if (err instanceof Error) {
-        console.error("Transcription error details:", err.message);
+        console.error("Processing error details:", err.message);
 
-        if (err.message.includes("timed out")) {
+        // Check for various specific conditions
+        if (
+          err.message.includes("timed out") ||
+          err.message.includes("timeout")
+        ) {
           errorMessage =
             "Your recording is too long. Please try a shorter recording.";
+        } else if (err.message.includes("too short")) {
+          errorMessage =
+            "Your recording is too short. Please record a longer message.";
         } else if (err.message.includes("OpenAI service")) {
           errorMessage =
             "OpenAI service is currently unavailable. Please try again later.";
+        } else if (
+          err.message.includes("gateway") ||
+          err.message.includes("504")
+        ) {
+          errorMessage =
+            "Connection timed out. Try a shorter recording or try again later.";
+        } else if (
+          err.message.includes("Invalid response") ||
+          err.message.includes("Unexpected token")
+        ) {
+          errorMessage =
+            "Server returned an invalid response. Please try again.";
         }
       }
 
